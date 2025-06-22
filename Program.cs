@@ -3,17 +3,17 @@ using System.Collections.Concurrent;
 using System.Drawing;
 using System.Text.Json;
 
+Console.ForegroundColor = ConsoleColor.Green;
 var progress = new Progress<ProgressReport>(report =>
 {
     if (report.Error != null)
     {
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"抓取页面 {report.CurrentPage} 时发生错误: {report.Error.Message}");
-        Console.ResetColor();
+        Console.ForegroundColor = ConsoleColor.Green;
     }
     else
     {
-        Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"已获取 {report.CurrentPage}/{report.TotalPages} 页 ({Math.Round((double)report.CurrentPage / report.TotalPages * 100, 2)}%)");
         Console.ResetColor();
     }
@@ -52,7 +52,7 @@ public class BeatsaverCrawler : IDisposable
     {
         var totalPages = await GetTotalPagesAsync();
         var tempFiles = new ConcurrentDictionary<int, string>();
-        var options = new ParallelOptions { MaxDegreeOfParallelism = 3 };
+        var options = new ParallelOptions { MaxDegreeOfParallelism = 2 };
 
         await Parallel.ForEachAsync(
             Enumerable.Range(0, totalPages),
