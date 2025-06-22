@@ -6,9 +6,17 @@ using System.Text.Json;
 var progress = new Progress<ProgressReport>(report =>
 {
     if (report.Error != null)
-        Console.WriteLine($"抓取页面 {report.CurrentPage} 时发生错误: {report.Error.Message}",Color.Red);
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"抓取页面 {report.CurrentPage} 时发生错误: {report.Error.Message}");
+        Console.ResetColor();
+    }
     else
-        Console.WriteLine($"已获取 {report.CurrentPage}/{report.TotalPages} 页",Color.Green);
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"已获取 {report.CurrentPage}/{report.TotalPages} 页 ({Math.Round((double)report.CurrentPage / report.TotalPages * 100, 2)}%)");
+        Console.ResetColor();
+    }
 });
 
 using var crawler = new BeatsaverCrawler(progress);
