@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "BeatSaverCacher": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
