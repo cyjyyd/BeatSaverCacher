@@ -1,7 +1,9 @@
 ﻿using Newtonsoft.Json;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Drawing;
 using System.Text.Json;
+
 
 Console.ForegroundColor = ConsoleColor.Green;
 var progress = new Progress<ProgressReport>(report =>
@@ -15,7 +17,6 @@ var progress = new Progress<ProgressReport>(report =>
     else
     {
         Console.WriteLine($"已获取 {report.CurrentPage}/{report.TotalPages} 页 ({Math.Round((double)report.CurrentPage / report.TotalPages * 100, 2)}%)");
-        Console.ResetColor();
     }
 });
 
@@ -37,30 +38,44 @@ public class BeatsaverCrawler : IDisposable
     private readonly HttpClient _client;
     private readonly IProgress<ProgressReport> _progress;
     private readonly ConcurrentBag<string> _tempFiles = new();
-
+    private readonly SemaphoreSlim _rateLimiter = new SemaphoreSlim(2, 4);
+    private readonly Stopwatch _stopwatch = new Stopwatch();
     public BeatsaverCrawler(IProgress<ProgressReport> progress)
     {
         _progress = progress;
         _client = new HttpClient(new SocketsHttpHandler
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-            MaxConnectionsPerServer = 5
+            MaxConnectionsPerServer = 4
         });
+        _stopwatch.Start();
     }
-
     public async Task CrawlAllMapsAsync(string outputPath)
     {
         var totalPages = await GetTotalPagesAsync();
         var tempFiles = new ConcurrentDictionary<int, string>();
-        var options = new ParallelOptions { MaxDegreeOfParallelism = 2 };
 
-        await Parallel.ForEachAsync(
-            Enumerable.Range(0, totalPages),
-            options,
-            async (page, ct) =>
+        var tasks = Enumerable.Range(0, totalPages)
+            .Select(async page =>
             {
-                tempFiles.TryAdd(page, await ProcessPageAsync(page, totalPages));
+                await _rateLimiter.WaitAsync();
+                try
+                {
+                    if (_stopwatch.ElapsedMilliseconds < 250)
+                    {
+                        await Task.Delay(250 - (int)_stopwatch.ElapsedMilliseconds);
+                    }
+                    _stopwatch.Restart();
+
+                    tempFiles.TryAdd(page, await ProcessPageAsync(page, totalPages));
+                }
+                finally
+                {
+                    _rateLimiter.Release();
+                }
             });
+
+        await Task.WhenAll(tasks);
         await WriteCompressedJsonAsync(outputPath, tempFiles, totalPages);
     }
 
