@@ -15,7 +15,6 @@ var progress = new Progress<ProgressReport>(report =>
     else
     {
         Console.WriteLine($"已获取 {report.CurrentPage}/{report.TotalPages} 页 ({Math.Round((double)report.CurrentPage / report.TotalPages * 100, 2)}%)");
-        Console.ResetColor();
     }
 });
 
@@ -51,45 +50,35 @@ public class BeatsaverCrawler : IDisposable
     public async Task CrawlAllMapsAsync(string outputPath)
     {
         var totalPages = await GetTotalPagesAsync();
-        var tempFiles = new ConcurrentDictionary<int, string>();
         var options = new ParallelOptions { MaxDegreeOfParallelism = 2 };
-
-        await Parallel.ForEachAsync(
-            Enumerable.Range(0, totalPages),
-            options,
-            async (page, ct) =>
+        var writerLock = new object();
+        using (var outputStream = new FileStream("localcache.saver", FileMode.Create))
+        using (var writer = new Utf8JsonWriter(outputStream, new JsonWriterOptions
+        {
+            Indented = false
+        }))
+        {
+            writer.WriteStartObject(); 
+            writer.WritePropertyName("docs");
+            writer.WriteStartArray();
+            await Parallel.ForEachAsync(Enumerable.Range(0, totalPages), options, async (page, ct) =>
             {
-                tempFiles.TryAdd(page, await ProcessPageAsync(page, totalPages));
+                using var inputStream = await ProcessPageAsync(page, totalPages);
+                var doc = JsonDocument.Parse(inputStream);
+                if (doc.RootElement.TryGetProperty("docs", out var docsArray))
+                {
+                    lock (writerLock)
+                    {
+                        foreach (var item in docsArray.EnumerateArray())
+                        {
+                            item.WriteTo(writer);
+                        }
+                    }
+                }
             });
-        await WriteCompressedJsonAsync(outputPath, tempFiles, totalPages);
-    }
-
-    public static async Task WriteCompressedJsonAsync(
-    string outputPath,
-    ConcurrentDictionary<int, string> tempFiles,
-    int totalPages)
-    {
-        var docs = new List<object>();
-
-        foreach (var page in Enumerable.Range(0, totalPages))
-        {
-            if (tempFiles.TryGetValue(page, out var file))
-            {
-                var json = await File.ReadAllTextAsync(file);
-                var doc = JsonConvert.DeserializeObject<dynamic>(json);
-                docs.AddRange(doc.docs.ToObject<List<object>>());
-                File.Delete(file);
-            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
         }
-
-        var settings = new JsonSerializerSettings
-        {
-            Formatting = Formatting.None,
-            NullValueHandling = NullValueHandling.Ignore
-        };
-
-        await File.WriteAllTextAsync(outputPath,
-        JsonConvert.SerializeObject(new { docs }, settings));
     }
 
     private async Task<int> GetTotalPagesAsync()
@@ -99,26 +88,23 @@ public class BeatsaverCrawler : IDisposable
         return (int)Math.Ceiling(doc.RootElement.GetProperty("info").GetProperty("total").GetInt32() / (double)PageSize);
     }
 
-    private async Task<string> ProcessPageAsync(int page, int totalPages)
+    private async Task<Stream> ProcessPageAsync(int page, int totalPages)
     {
         try
         {
             var response = await _client.GetStringAsync($"{ApiUrl}{page}?pageSize={PageSize}");
-            var tempFile = Path.GetTempFileName();
-            await File.WriteAllTextAsync(tempFile, response);
-
             _progress?.Report(new ProgressReport
             {
                 CurrentPage = page + 1,
                 TotalPages = totalPages
             });
-
-            return tempFile;
+            var memoryStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(response));
+            return memoryStream;
         }
         catch (Exception ex)
         {
             _progress?.Report(new ProgressReport { Error = ex });
-            return null;
+            return Stream.Null;
         }
     }
 
